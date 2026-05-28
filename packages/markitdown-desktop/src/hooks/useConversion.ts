@@ -28,6 +28,17 @@ export function useConversion(options: ConvertOptions) {
         } else {
           throw new Error("Provide a file path or URL.");
         }
+
+        // Wrap the markdown with clear BEGIN / END markers
+        const label = result.source.split(/[\\/]/).pop() ?? result.source;
+        result = {
+          ...result,
+          markdown:
+            `----- BEGIN content of ${label} -----\n\n` +
+            result.markdown.trim() +
+            `\n\n----- END content of ${label} -----`,
+        };
+
         setState({ status: "success", result, error: null });
         return result;
       } catch (err) {

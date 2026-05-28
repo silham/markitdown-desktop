@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            sidecar-ext: '.exe'
+          - platform: macos-13          # Intel
+            target: x86_64-apple-darwin
+            sidecar-ext: ''
+          - platform: macos-latest      # Apple Silicon
+            target: aarch64-apple-darwin
+            sidecar-ext: ''
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Python sidecar ──────────────────────────────────────────────────
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install sidecar dependencies
+        working-directory: packages/markitdown-desktop/python-backend
+        run: pip install -r requirements.txt
+
+      - name: Build Python sidecar with PyInstaller
+        working-directory: packages/markitdown-desktop/python-backend
+        run: pyinstaller build.spec --distpath ../src-tauri/binaries --clean
+
+      - name: Rename sidecar binary to include target triple (Unix)
+        if: runner.os != 'Windows'
+        working-directory: packages/markitdown-desktop/src-tauri/binaries
+        run: mv markitdown-sidecar markitdown-sidecar-${{ matrix.target }}
+
+      - name: Rename sidecar binary to include target triple (Windows)
+        if: runner.os == 'Windows'
+        working-directory: packages/markitdown-desktop/src-tauri/binaries
+        shell: pwsh
+        run: Rename-Item markitdown-sidecar.exe markitdown-sidecar-${{ matrix.target }}.exe
+
+      # ── Node / pnpm ─────────────────────────────────────────────────────
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: packages/markitdown-desktop/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: packages/markitdown-desktop
+        run: pnpm install
+
+      # ── Rust ────────────────────────────────────────────────────────────
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust build artefacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/markitdown-desktop/src-tauri -> target
+
+      # ── Tauri build & release ───────────────────────────────────────────
+      - name: Build and publish Tauri release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: packages/markitdown-desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: 'MarkItDown Desktop ${{ github.ref_name }}'
+          releaseBody: |
+            ## What's new
+            See the commits for a full list of changes.
+
+            ## Downloads
+            | Platform | File |
+            |----------|------|
+            | Windows  | `.msi` installer |
+            | macOS (Intel) | `.dmg` disk image |
+            | macOS (Apple Silicon) | `.dmg` disk image |
+          releaseDraft: true
+          prerelease: false
+          args: --target ${{ matrix.target }}

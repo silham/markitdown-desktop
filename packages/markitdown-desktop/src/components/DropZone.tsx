@@ -68,7 +68,7 @@ export function DropZone({ onFiles, onUrl, disabled }: DropZoneProps) {
           const { type } = event.payload;
           if (type === "over") {
             if (!disabledRef.current) setDragging(true);
-          } else if (type === "leave" || type === "cancel") {
+          } else if (type === "leave") {
             setDragging(false);
           } else if (type === "drop") {
             setDragging(false);

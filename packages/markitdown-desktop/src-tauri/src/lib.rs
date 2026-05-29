@@ -27,32 +27,52 @@ fn get_sidecar_port(state: State<SidecarState>) -> Option<u16> {
 // ---------------------------------------------------------------------------
 
 fn start_sidecar(app: &AppHandle) -> Result<(), String> {
-    // Resolve the python-backend directory relative to src-tauri at dev time,
-    // or relative to the resource dir at runtime.
-    let backend_dir = {
+    // In a packaged/installed app the PyInstaller sidecar sits next to the
+    // main executable.  In dev we fall back to running server.py via the
+    // local .venv so `pnpm tauri dev` keeps working without a build step.
+    let sidecar_name = if cfg!(target_os = "windows") {
+        "markitdown-sidecar.exe"
+    } else {
+        "markitdown-sidecar"
+    };
+
+    let exe_dir = std::env::current_exe()
+        .map_err(|e| format!("Cannot locate current exe: {e}"))?
+        .parent()
+        .ok_or("Cannot get exe parent directory")?
+        .to_path_buf();
+
+    let production_sidecar = exe_dir.join(sidecar_name);
+
+    let mut cmd = if production_sidecar.exists() {
+        // ── Production: run the bundled PyInstaller binary ────────────────
+        let mut c = Command::new(&production_sidecar);
+        c.stdout(Stdio::piped());
+        c.stderr(Stdio::inherit());
+        c
+    } else {
+        // ── Dev: run server.py via the python-backend .venv ───────────────
         let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let raw = manifest.join("../python-backend");
-        std::fs::canonicalize(&raw)
-            .map_err(|e| format!("Cannot resolve backend dir '{}': {e}", raw.display()))?
-    };
+        let backend_dir = std::fs::canonicalize(&raw)
+            .map_err(|e| format!("Cannot resolve backend dir '{}': {e}", raw.display()))?;
 
-    let python = if cfg!(target_os = "windows") {
-        backend_dir.join(".venv/Scripts/python.exe")
-    } else {
-        backend_dir.join(".venv/bin/python")
-    };
+        let python = if cfg!(target_os = "windows") {
+            backend_dir.join(".venv/Scripts/python.exe")
+        } else {
+            backend_dir.join(".venv/bin/python")
+        };
 
-    let mut cmd = Command::new(&python);
-    cmd.arg(backend_dir.join("server.py"));
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::inherit());
-    cmd.current_dir(&backend_dir);
+        let mut c = Command::new(&python);
+        c.arg(backend_dir.join("server.py"));
+        c.stdout(Stdio::piped());
+        c.stderr(Stdio::inherit());
+        c.current_dir(&backend_dir);
+        c
+    };
 
     let mut child = cmd.spawn().map_err(|e| {
-        format!(
-            "Failed to start Python sidecar at '{}': {e}",
-            python.display()
-        )
+        format!("Failed to start sidecar: {e}")
     })?;
 
     // Read the port from the first stdout line: "SIDECAR_PORT=XXXX"

@@ -17,9 +17,6 @@ jobs:
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
             sidecar-ext: '.exe'
-          - platform: macos-13          # Intel
-            target: x86_64-apple-darwin
-            sidecar-ext: ''
           - platform: macos-latest      # Apple Silicon
             target: aarch64-apple-darwin
             sidecar-ext: ''
@@ -100,7 +97,6 @@ jobs:
             | Platform | File |
             |----------|------|
             | Windows  | `.msi` installer |
-            | macOS (Intel) | `.dmg` disk image |
             | macOS (Apple Silicon) | `.dmg` disk image |
           releaseDraft: true
           prerelease: false

@@ -64,17 +64,41 @@ export default function App() {
       const existingPort = await getTauriSidecarPort();
       if (existingPort) localStorage.setItem("sidecar_port", String(existingPort));
 
-      // Poll until the sidecar responds to /ping
-      let attempts = 0;
-      const maxAttempts = 40;
+      // Poll until the sidecar responds to /ping.
+      // On first run the PyInstaller one-file binary needs time to self-extract
+      // (~10-20 s) before uvicorn starts, so we:
+      //  - don't count attempts until the port is actually known
+      //  - allow up to 60 s of failed pings after the port is known
+      //  - enforce a 150 s hard ceiling in case the port never arrives
+      let pingAttempts = 0;
+      const maxPingAttempts = 120; // 120 × 500 ms = 60 s
+      let elapsed = 0;
+      const hardLimit = 300;       // 300 × 500 ms = 150 s
+      let portKnown = !!localStorage.getItem("sidecar_port");
+
       const interval = setInterval(async () => {
         if (cancelled) { clearInterval(interval); unlisten(); return; }
+
+        elapsed++;
+        if (elapsed >= hardLimit) {
+          setSidecarError(true);
+          clearInterval(interval);
+          unlisten();
+          return;
+        }
+
+        // Wait until we know which port the sidecar chose
+        if (!portKnown) {
+          portKnown = !!localStorage.getItem("sidecar_port");
+          if (!portKnown) return;
+        }
+
         const ok = await ping();
         if (ok) {
           setSidecarReady(true);
           clearInterval(interval);
           unlisten();
-        } else if (++attempts >= maxAttempts) {
+        } else if (++pingAttempts >= maxPingAttempts) {
           setSidecarError(true);
           clearInterval(interval);
           unlisten();
